@@ -1,26 +1,3 @@
-"""
-compare.py — Macro comparison plot for all autocorrelation3D_* runs.
-
-Usage
------
-python3 compare.py /path/to/root_dir [options]
-
-The script scans root_dir for folders matching autocorrelation3D_* (or a
-custom glob), loads each autocorrelation_raw.h5 inside, fits XY and Z
-autocorrelation curves, then assembles a single summary figure per channel.
-
-Layout (one figure per channel that has data):
-  rows = runs  (sorted by the numeric suffix)
-  cols = [XY autocorrelation | Z autocorrelation]
-
-A summary CSV with fit parameters for all runs × channels is also written.
-
-Example
--------
-python3 compare.py /home/arthur/Documents/slices/elastix_transfer_full \
-        --units physical --z-scale 2.18 --model triple --n-starts 100
-"""
-
 import argparse
 import csv
 import fnmatch
@@ -39,13 +16,8 @@ if _script_dir not in sys.path:
 
 from fit import fit_autocorrelation  # noqa: E402
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
 
 def _scale_label(xy_scale, z_scale, use_pixel_units, direction="xy"):
-    """Return a clear scale annotation string."""
     if use_pixel_units:
         return "units: pixels (no physical scale applied)"
     if direction == "xy":
@@ -73,7 +45,7 @@ def discover_runs(root: str, pattern: str = "autocorrelation3D_*") -> list[dict]
         if not os.path.isfile(h5_path):
             h5_candidates = [f for f in os.listdir(entry.path) if f.endswith(".h5")]
             if not h5_candidates:
-                print(f"  [skip] {entry.name}: no .h5 file found")
+                print(f"  skipping {entry.name}: no .h5 file found")
                 continue
             h5_path = os.path.join(entry.path, h5_candidates[0])
 
@@ -213,7 +185,7 @@ def make_comparison_figure(
         hspace=0.05,
     )
 
-    # ── info strip ──────────────────────────────────────────────────────────
+    # info strip
     ax_info = fig.add_subplot(outer_rows[0])
     ax_info.axis("off")
     ax_info.set_title(
@@ -273,7 +245,7 @@ def make_comparison_figure(
         for col_idx in range(len(col_labels)):
             tbl[row_idx, col_idx].set_facecolor(shade)
 
-    # ── plots area ──────────────────────────────────────────────────────────
+    # plots area
     outer = gridspec.GridSpecFromSubplotSpec(
         1, n_cols, subplot_spec=outer_rows[1], wspace=0.30
     )
@@ -299,8 +271,6 @@ def make_comparison_figure(
 
             fit, x_vals, y_vals = results[label][direction]
 
-            # Each row: data+fit panel (top) + residuals panel (bottom)
-            # When show_errors=False the residuals panel is hidden.
             if show_errors and fit is not None:
                 row_gs = gridspec.GridSpecFromSubplotSpec(
                     2,
@@ -383,7 +353,6 @@ def make_comparison_figure(
             ax_top.grid(True, ls="--", alpha=0.35)
             ax_top.tick_params(labelsize=7)
 
-            # scale annotation and x-label placement
             if ax_bot is not None:
                 plt.setp(ax_top.get_xticklabels(), visible=False)
                 ax_bot.set_ylabel("Error Data/Fit", fontsize=7)
@@ -556,9 +525,9 @@ def main():
     )
     parser.add_argument("--no-overlay", action="store_true")
     parser.add_argument(
-        "--no-errors",
+        "--show-errors",
         action="store_true",
-        help="Hide residual subplots and ± uncertainty in legend entries.",
+        help="Show residual subplots and ± uncertainty in legend entries.",
     )
     args = parser.parse_args()
 
@@ -571,7 +540,7 @@ def main():
     os.makedirs(out_dir, exist_ok=True)
 
     use_pixel_units = args.units == "pixel"
-    show_errors = not args.no_errors
+    show_errors = args.show_errors
 
     print(f"Scanning {root} for pattern '{args.pattern}' …")
     runs = discover_runs(root, pattern=args.pattern)

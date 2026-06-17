@@ -7,7 +7,6 @@ from fit import FitResult, fit_autocorrelation
 
 
 def _scale_label(xy_scale, z_scale, use_pixel_units, direction="xy"):
-    """Return a clear scale annotation string."""
     if use_pixel_units:
         return "units: pixels (no physical scale applied)"
     if direction == "xy":
@@ -54,7 +53,7 @@ def plot_xy_autocorrelation(
     if fit is not None:
         print(f"ch {ch_idx} XY | {fit.summary(scale=scale, unit=unit)}")
         if w := fit.warning():
-            print(f"  ⚠ {w}")
+            print(f"  Warning: {w}")
 
         ax1.plot(
             x_vals,
@@ -163,7 +162,7 @@ def plot_z_autocorrelation(
     if fit is not None:
         print(f"ch {ch_idx} Z  | {fit.summary(scale=scale, unit=unit)}")
         if w := fit.warning():
-            print(f"  ⚠ {w}")
+            print(f"  Warning {w}")
 
         ax1.plot(
             z_vals,
@@ -260,9 +259,9 @@ def main():
     )
     parser.add_argument("--n-starts", type=int, default=50)
     parser.add_argument(
-        "--no-errors",
+        "--show-errors",
         action="store_true",
-        help="Hide residual subplot and ± uncertainty in legend entries.",
+        help="Show residual subplot and ± uncertainty in legend entries.",
     )
     args = parser.parse_args()
 
@@ -271,7 +270,7 @@ def main():
     os.makedirs(args.output_folder, exist_ok=True)
 
     use_pixel_units = args.units == "pixel"
-    show_errors = not args.no_errors
+    show_errors = args.show_errors
 
     with h5py.File(args.h5_file, "r") as f:
         xy_scale = float(f.attrs["xy_scale"])

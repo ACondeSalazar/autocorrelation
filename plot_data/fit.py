@@ -3,9 +3,7 @@ from dataclasses import dataclass
 import numpy as np
 from scipy.optimize import curve_fit
 
-# ---------------------------------------------------------------------------
-# Models
-# ---------------------------------------------------------------------------
+# models
 
 
 def single_exp(r, A, l1):
@@ -45,9 +43,7 @@ MODELS = {
 }
 
 
-# ---------------------------------------------------------------------------
-# Fit result container
-# ---------------------------------------------------------------------------
+# fit result
 
 
 @dataclass
@@ -92,73 +88,37 @@ class FitResult:
         return None
 
 
-# ---------------------------------------------------------------------------
-# Initialization strategies
-# ---------------------------------------------------------------------------
-# Each strategy returns a p0 list or None if it cannot produce valid bounds.
-# The caller is responsible for checking bounds consistency.
-#
-# For single/double/triple we define two families of strategies:
-#   "positive"  – all amplitudes positive, curve stays >= 0 everywhere
-#   "negative"  – at least one amplitude pushed negative so the curve can dip
-#
-# Roughly 1/4 of starts use the negative family; the rest use positive.
-# This ratio is intentionally asymmetric: most autocorrelation curves are
-# non-negative, so we do not want to waste the majority of starts on the
-# negative region. 1/4 is enough to reliably find a negative-dip solution
-# when the data requires it.
-# ---------------------------------------------------------------------------
-
-_NEG_FRAC = 0.25  # fraction of starts dedicated to negative-dip initialisation
+# 1/4 of starts explore negative region
+NEG_FRAC = 0.25
 
 
 def _p0_single(rng, x_max, negative, eps):
-    """
-    Sample p0 for single_exp: [A, l1].
-
-    Positive family : A ∈ (0, 1]  → curve always non-negative.
-    Negative family : A > 1        → because B = 1-A < 0 is implicit in the
-                                     single model (there is no B), the only
-                                     way single_exp itself goes negative is if
-                                     A < 0.  We therefore allow A ∈ [-1, 0).
-    """
     lo1 = max(eps, x_max * 0.01)
     hi1 = max(lo1 + eps, x_max * 0.5)
-    l1  = rng.uniform(lo1, hi1)
+    l1 = rng.uniform(lo1, hi1)
 
     if negative:
-        A = rng.uniform(-1.0, -eps)   # negative amplitude → curve dips below 0
+        A = rng.uniform(-1.0, -eps)
     else:
         A = rng.uniform(eps, 1.0)
 
-    # bounds: A is fully free in [-2, 2]; l1 > 0
     bounds = ([-2.0, eps], [2.0, x_max * 2 + eps])
     return [A, l1], bounds
 
 
 def _p0_double(rng, x_max, negative, eps):
-    """
-    Sample p0 for double_exp: [A, l1, l2].
-    B = 1 - A is implicit.
-
-    Positive family : A ∈ (0, 1) so B ∈ (0, 1) → both terms positive.
-    Negative family : A > 1      so B = 1-A < 0 → second (long) term negative.
-                   or A < 0      so B = 1-A > 1 → first (short) term negative.
-    Both sub-cases are sampled with equal probability within the negative family.
-    """
     lo1 = max(eps, x_max * 0.01)
     hi1 = max(lo1 + eps, x_max * 0.1)
     lo2 = hi1
     hi2 = max(lo2 + eps, x_max * 1.0)
-    l1  = rng.uniform(lo1, hi1)
-    l2  = rng.uniform(lo2, hi2)
+    l1 = rng.uniform(lo1, hi1)
+    l2 = rng.uniform(lo2, hi2)
 
     if negative:
         if rng.random() < 0.5:
-            A = rng.uniform(1.0 + eps, 2.0)   # B = 1-A < 0  (long arm negative)
+            A = rng.uniform(1.0 + eps, 2.0)  # B = 1-A < 0
         else:
-            A = rng.uniform(-1.0, -eps)        # B = 1-A > 1  (short arm negative,
-                                               # large positive long arm)
+            A = rng.uniform(-1.0, -eps)  # B = 1-A > 1
     else:
         A = rng.uniform(eps, 1.0 - eps)
 
@@ -167,26 +127,11 @@ def _p0_double(rng, x_max, negative, eps):
 
 
 def _p0_triple(rng, x_max, negative, eps):
-    """
-    Sample p0 for triple_exp: [A, B, l1, l2, l3].
-    C = 1 - A - B is implicit.
-
-    Positive family : A > 0, B > 0, A+B < 1  → C > 0, all terms positive.
-
-    Negative family – three sub-cases, each with probability 1/3:
-      (a) C < 0  : A+B > 1, both A and B positive.
-                   The long (l3) exponential arm is negative.
-                   This is the most physically common case (damped oscillation
-                   approximated by an overshoot in the slowest component).
-      (b) B < 0  : short-mid arm negative.
-      (c) A < 0  : short arm negative.
-    """
-    # tier boundaries
     t1_hi = max(eps * 2, x_max * 0.05)
-    t1_lo = max(eps,     t1_hi * 0.1)
+    t1_lo = max(eps, t1_hi * 0.1)
     t2_lo = t1_hi
     t2_hi = max(t2_lo + eps, x_max * 0.3)
-    t3_lo = max(t2_hi,       x_max * 0.3)
+    t3_lo = max(t2_hi, x_max * 0.3)
     t3_hi = max(t3_lo + eps, x_max * 2.0)
 
     l1 = rng.uniform(t1_lo, t1_hi)
@@ -196,10 +141,11 @@ def _p0_triple(rng, x_max, negative, eps):
     if negative:
         sub = rng.integers(3)
         if sub == 0:
-            # C < 0: A+B > 1, both positive
+            # C < 0: long arm negative, enforced by A + B > 1
             A = rng.uniform(0.5, 1.2)
-            B = rng.uniform(0.3, 1.2 - A + 0.4)   # ensures A+B can exceed 1
-            B = max(eps, B)
+            B_lo = max(eps, 1.0 - A + eps)
+            B_hi = max(B_lo + eps, 1.6 - A)
+            B = rng.uniform(B_lo, B_hi)
         elif sub == 1:
             # B < 0
             A = rng.uniform(0.5, 1.0)
@@ -214,17 +160,9 @@ def _p0_triple(rng, x_max, negative, eps):
 
     bounds = (
         [-2.0, -2.0, eps, eps, eps],
-        [ 2.0,  2.0,
-          max(eps, x_max * 0.1),
-          max(eps, x_max * 0.5),
-          x_max * 2 + eps],
+        [2.0, 2.0, max(eps, x_max * 0.1), max(eps, x_max * 0.5), x_max * 2 + eps],
     )
     return [A, B, l1, l2, l3], bounds
-
-
-# ---------------------------------------------------------------------------
-# Fitting
-# ---------------------------------------------------------------------------
 
 
 def fit_autocorrelation(
@@ -234,28 +172,6 @@ def fit_autocorrelation(
     n_starts: int = 50,
     seed: int = 42,
 ) -> "FitResult | None":
-    """
-    Robust multi-start fit of an autocorrelation curve.
-
-    For single / double / triple exponential models, roughly 1/4 of random
-    starts are initialised in the "negative-dip" region so the optimiser can
-    find solutions where one amplitude component is negative and the curve
-    drops below zero — as is physically observed in oscillatory or
-    anti-correlated signals.
-
-    Parameters
-    ----------
-    x       : lag axis (pixels or physical units)
-    y       : autocorrelation values (need not be normalised to 1)
-    model   : "single" | "double" | "triple" | "gaussian" | "damped_cosine"
-              | "stretched" | "stretched_exp"
-    n_starts: number of random initialisations
-    seed    : RNG seed for reproducibility
-
-    Returns
-    -------
-    FitResult or None if all starts failed
-    """
     if not np.any(np.isfinite(y)):
         return None
 
@@ -267,17 +183,10 @@ def fit_autocorrelation(
     best_popt, best_pcov, best_r2 = None, None, -np.inf
 
     for i in range(n_starts):
-
-        # Decide whether this start should explore negative-dip territory.
-        # We use a deterministic schedule (every 4th start) rather than a
-        # random coin flip so the coverage is uniform across the run.
         use_negative = (model in ("single", "double", "triple")) and (
-            i % round(1.0 / _NEG_FRAC) == 0
+            i % round(1.0 / NEG_FRAC) == 0
         )
 
-        # ------------------------------------------------------------------
-        # Build p0 and bounds
-        # ------------------------------------------------------------------
         try:
             if model == "single":
                 p0, bounds = _p0_single(rng, x_max, use_negative, eps)
@@ -295,21 +204,21 @@ def fit_autocorrelation(
                 bounds = ([0, eps], [1, x_max * 2 + eps])
 
             elif model == "damped_cosine":
-                A  = rng.uniform(0.1, 1.0)
+                A = rng.uniform(0.1, 1.0)
                 lo1 = max(eps, x_max * 0.05)
                 hi1 = max(lo1 + eps, x_max * 0.5)
-                l1  = rng.uniform(lo1, hi1)
-                l2  = rng.uniform(max(eps, x_max * 0.1), max(eps * 2, x_max))
-                p0  = [A, l1, l2]
+                l1 = rng.uniform(lo1, hi1)
+                l2 = rng.uniform(max(eps, x_max * 0.1), max(eps * 2, x_max))
+                p0 = [A, l1, l2]
                 bounds = ([0, eps, eps], [1, x_max * 2 + eps, x_max * 4 + eps])
 
             elif model in ("stretched", "stretched_exp"):
-                A   = rng.uniform(0.5, 1.0)
+                A = rng.uniform(0.5, 1.0)
                 lo1 = max(eps, x_max * 0.01)
                 hi1 = max(lo1 + eps, x_max * 0.5)
-                l1  = rng.uniform(lo1, hi1)
+                l1 = rng.uniform(lo1, hi1)
                 beta = rng.uniform(0.2, 1.5)
-                p0   = [A, l1, beta]
+                p0 = [A, l1, beta]
                 bounds = ([0, eps, 0.1], [1, x_max * 2 + eps, 2.0])
 
             else:
@@ -320,9 +229,6 @@ def fit_autocorrelation(
         except Exception:
             continue
 
-        # ------------------------------------------------------------------
-        # Optimise
-        # ------------------------------------------------------------------
         try:
             popt, pcov = curve_fit(
                 func,
@@ -346,21 +252,21 @@ def fit_autocorrelation(
     if best_popt is None:
         return None
 
-    y_pred  = func(x, *best_popt)
-    ss_res  = np.sum((y - y_pred) ** 2)
-    ss_tot  = np.sum((y - y.mean()) ** 2)
-    rmse    = float(np.sqrt(np.mean((y - y_pred) ** 2)))
-    r2      = float(1.0 - ss_res / ss_tot) if ss_tot > 0 else -np.inf
-    perr    = np.sqrt(np.diag(best_pcov))
-    rel_err = perr / np.abs(best_popt)
+    y_predicted = func(x, *best_popt)
+    sum_squared_residuals = np.sum((y - y_predicted) ** 2)
+    sum_squared_total = np.sum((y - y.mean()) ** 2)
+    root_mean_squared_error = float(np.sqrt(np.mean((y - y_predicted) ** 2)))
+    r_squared = float(1.0 - sum_squared_residuals / sum_squared_total) if sum_squared_total > 0 else -np.inf
+    parameter_errors = np.sqrt(np.diag(best_pcov))
+    relative_errors = parameter_errors / np.abs(best_popt)
 
     return FitResult(
         model=model,
         popt=best_popt,
         pcov=best_pcov,
-        r2=r2,
-        rmse=rmse,
-        rel_err=rel_err,
+        r2=r_squared,
+        rmse=root_mean_squared_error,
+        rel_err=relative_errors,
         param_names=param_names,
-        y_pred=y_pred,
+        y_pred=y_predicted,
     )
