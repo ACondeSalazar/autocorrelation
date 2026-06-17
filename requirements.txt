@@ -1,0 +1,9 @@
+h5py
+numpy
+psutil
+pyfftw
+pyvips
+scikit-image
+natsort
+scipy
+tqdm

@@ -1,0 +1,5 @@
+*.pkl
+.sloth_cache/
+__pycache__/
+*.nii
+*.h5
